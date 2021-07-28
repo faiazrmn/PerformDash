@@ -1,0 +1,4478 @@
+## ----setup, include=FALSE--------------------------
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+
+## --------------------------------------------------
+library(readxl)
+require(dplyr)
+require(shiny)
+require(ggplot2)
+require(plotly)
+require(knitr)
+library(kableExtra)
+require(janitor)
+require(tidyr)
+require(DT)
+
+####################################################
+####################################################
+####################################################
+
+
+# Steps
+
+# Read Current Month Data
+# Read Not Submitted Excel Files for Table
+# Read Previous Rank Table Excel File
+# Write csv File
+
+
+##### Current Month With All Reports
+
+dat <- read_excel("February Data 2 All Activity.xlsx", col_names = TRUE)
+
+
+###### Read data of previous Month ######
+
+PreviousMonth <- read.csv("CalculatedNovember.csv", header = T)
+datprevmonth <- PreviousMonth
+# View(dat)
+
+
+###### Not Submitted Reports Excel File ######
+
+datmissing <- read_xlsx("Not Submitted Reports.xlsx")
+
+
+###### Previous Month Marks for ranks ######
+
+datprevrank <- read_excel("prevrank.xlsx")
+
+####################################################
+####################################################
+####################################################
+
+
+
+## ---- eval=TRUE, results='hide'--------------------
+# Check Data
+head(dat)
+# Check variables
+glimpse(dat)
+# CHeck Names for duplicates, Edit if necessary
+unique(dat$Name)
+# Check Key Activity
+unique(dat$`Key Activity`)
+# Check Importance
+table(dat$Importance)
+# Check Deadline
+table(dat$Deadline)
+# Check Marks Range for outliers #### Marks is given by Leads ####
+range(dat$Marks)
+# Check Weeks for any duplicates
+table(dat$Week)
+# Check MOnths
+table(dat$Month)
+# Check Team
+table(dat$Team)
+#Check SUbteam
+table(dat$Subteam)
+
+# Check Name and Team
+dat %>% group_by(Name, Team, Subteam) %>% summarise(n()) %>% arrange(Team, Name)
+
+
+# Calculate Quantitative Mark
+PriMark <- NULL
+for(i in 1:length(dat$Name)){
+    if(dat$Importance[i] == "High"){
+        PriMark[i] <- 5
+    }
+    if(dat$Importance[i] == "Medium"){
+        PriMark[i] <- 3
+    }
+    if(dat$Importance[i] == "Moderate"){
+        PriMark[i] <- 2
+    }
+}
+dat$PriMark <- PriMark
+# PriMark is marks based on priority
+table(dat$PriMark)
+table(dat$Importance)
+
+
+DeadMark <- NULL
+for(i in 1:length(dat$Name)){
+    if(dat$Deadline[i] == "Ceiling"){
+        DeadMark[i] <- 1
+    }
+    if(dat$Deadline[i] == "Target"){
+        DeadMark[i] <- 0.90
+    }
+    if(dat$Deadline[i] == "Floor"){
+        DeadMark[i] <- 0
+    }
+}
+dat$DeadMark <- DeadMark
+# DeadMark is marks based on Deadline Time
+table(dat$DeadMark)
+
+table(dat$Deadline)
+
+
+dat <- dat %>% group_by(Name) %>% mutate(Target = PriMark / sum(PriMark)) 
+
+
+# Check if target is 100% for each at each month
+dat %>% group_by(Name, Month) %>% summarise(sum(Target), n())
+# This Target is Marks based on Frequency and numbers based on priotity
+# Target is Target Marks For each individual in each individual task
+
+
+# QuanTitative Marks
+# dat$QuanMark <- dat$DeadMark * dat$Target * 0.50
+
+dat$QualMark <- dat$Marks * dat$Target
+
+dat$FinalMark <- dat$QualMark
+
+
+# Check Rankings Based in Final MArks
+dat %>% 
+  group_by(Name) %>% 
+  summarise(sorttc = sum(QualMark)) %>% 
+  arrange(desc(sorttc))
+
+# View(dat)
+
+dat$tgt <- dat$Target / sum(dat$Target)
+dat$ach <- dat$QualMark / sum(dat$Target) 
+
+# tgt and ach by Team for Individual team slide
+
+dat <- dat %>% 
+  group_by(Team) %>% 
+  mutate(tgtteam = tgt / sum(tgt),
+         achteam = ach / sum(tgt))
+
+sum(dat$tgtteam)
+sum(dat$achteam)
+
+
+
+
+## ---- eval=FALSE-----------------------------------
+## ## **Welcome**
+## ### Welcome to Engineering and Analytics Team Activity Dashboard
+## #### July, 2020
+
+
+## --------------------------------------------------
+
+pbakey <- dat %>% 
+  group_by(`Key Activity`) %>% 
+  summarise(TGT = round(100*sum(tgt),1), Ach = round(100*sum(ach),2) ) %>% 
+  mutate(ACH = ifelse(Ach>TGT, TGT, Ach)) %>% 
+  arrange(desc(TGT)) %>% 
+  mutate(`ACH%` = round(100*ACH/TGT,1)) %>% 
+  select(`Key Activity`, TGT, ACH, `ACH%`) 
+
+pbakey <- pbakey[1:10,] # TOp 10 activities of p&ba
+
+# Add others row in pbakey
+
+ot <- 100 - sum(pbakey$TGT)
+ot <- as.double(ot)                
+oth <- data.frame("Others", as.double(ot), 0,0)
+
+pbakey[11,] <- oth
+
+
+#Previous Month
+pbaprev <- datprevmonth %>% 
+  group_by(Key.Activity) %>% 
+  summarise(TGT = round(100*sum(tgt),1), Ach = round(100*sum(ach),2) ) %>% 
+  mutate(ACH = ifelse(Ach>TGT, TGT, Ach)) %>% 
+  arrange(desc(TGT)) %>% 
+  mutate(`ACH%` = round(100*ACH/TGT,1)) %>% 
+  select(Key.Activity, TGT, ACH, `ACH%`) 
+
+pbaprev <- pbaprev[1:7,] # TOp 5 key activities of p&ba of previous month
+
+# Add others row in pbaprev
+
+ot <- 100 - sum(pbaprev$TGT)
+ot <- as.double(ot)                
+oth <- data.frame("Others", as.double(ot), 0,0)
+
+pbaprev[8,] <- oth
+
+
+
+
+
+## --------------------------------------------------
+
+colors <- c('rgba(249, 146, 108, 1)',
+            'rgba(114, 195, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)'
+            )
+
+                          
+
+# Add Title
+pltttl <- 100* round( sum(dat$ach), 3)
+
+pltttl12 <- paste("Team Achievement", pltttl,"%")
+
+plot_ly(data = pbakey, labels = ~`Key Activity`, values = ~TGT, type = 'pie', 
+                         sort=T, direction="anticlockwise", marker = list(colors = colors, line = list(color = '#FFFFFF', width = 1.2)),
+        
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent', hoverinfo = 'label+percent', textfont = list(size = 13), textposition = 'outside', 
+                          showlegend = F, height = 350, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 85, t = 55,  pad = 1 ),
+                     title=pltttl12,
+         font=list(  size = 12)) 
+
+
+## ---- eval=FALSE-----------------------------------
+## #### Previous Month Key Activities
+## 
+## colors <- c('rgba(249, 146, 108, 1)',
+##             'rgba(114, 195, 218, 1)',
+##             'rgba(108, 224, 189, 1)',
+##             'rgba(239, 118, 118, 1)',
+##             'rgba( 18, 167, 226, 1)',
+##             'rgba(244, 113, 222, 1)',
+##             'rgba(114, 218, 136, 1)',
+##             'rgba(255, 148, 184, 1)',
+##             'rgba(218, 114, 159, 1)',
+##             'rgba(114, 161, 218, 1)'
+##             )
+## 
+## # Add Title
+## pltttl2 <- 100* round( sum(datprevmonth$ach), 3)
+## 
+## pltttl22 <- paste("Team Achievement", pltttl2,"%")
+## 
+## plot_ly(data = pbaprev, labels = ~Key.Activity, values = ~TGT, type = 'pie',
+##                          sort=T, direction="anticlockwise", marker = list(colors = colors, line = list(color = '#FFFFFF', width = 1.2)),
+##                           #title= pltttl22,
+##            #title='<b>Key Activities</b>' ,
+##                          textinfo='label+percent', hoverinfo = 'label+percent', textfont = list(size = 13), textposition = 'outside',
+##                           showlegend = F, height = 350, width = 950
+##         ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 85, t = 55,  pad = 1 ),
+##                      title=pltttl22,
+##          font=list(  size = 12))
+
+
+## --------------------------------------------------
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  #filter(Team == "Engineering") %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+  #filter(Team == "Engineering") %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  #filter(Team == "Engineering") %>% 
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`, na.rm = T),
+            Formmean = mean(`Formatting (20%)`, na.rm = T))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = "Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`,  
+  textfont = list(size = 14), 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,   
+  textfont = list(size = 14),
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+
+
+
+## --------------------------------------------------
+
+#### Engineering & Analytics Team Top 10 Key Activities Table
+
+#kable(pbakey)
+
+
+
+## --------------------------------------------------
+
+#### Engineering & Analytics Team Top 10 Extended Responsibility Table
+
+# kable(pbaext)
+
+
+
+## --------------------------------------------------
+
+pkey <- dat %>% 
+  filter(Team == "Engineering") %>% 
+  group_by(`Key Activity`) %>% 
+  summarise(TGT = round(100*sum(tgtteam),1), Ach = round(100*sum(achteam),2) ) %>% 
+  mutate(ACH = ifelse(Ach>TGT, TGT, Ach)) %>% 
+  arrange(desc(TGT)) %>% 
+  mutate(`ACH%` = round(100*ACH/TGT,1)) %>% 
+  select(`Key Activity`, TGT, ACH, `ACH%`) 
+
+pkey <- pkey[1:10,]  ###### Select Top 2 Key Activities ########
+
+
+
+# Add others row in pkey
+
+ot <- 100 - sum(pkey$TGT)
+ot <- as.double(ot)                
+oth <- data.frame("Others", as.double(ot), 0,0)
+
+pkey[11,] <- oth
+
+
+pext <- dat %>% 
+  filter(Team == "Engineering") %>% 
+  group_by(`Extended Responsibility`) %>% 
+  summarise(TGT = round(100*sum(tgt),2), Ach = round(100*sum(ach),2) ) %>% 
+  mutate(ACH = ifelse(Ach>TGT, TGT, Ach)) %>% 
+  arrange(desc(ACH)) %>% 
+  mutate(`ACH%` = round(100*ACH/TGT,1)) %>% 
+  select(`Extended Responsibility`, TGT, ACH, `ACH%`)
+
+pext <- pext[1:10,] # Select Top 10 Extended Responsibilities
+
+
+
+#Previous Month
+pkeyprev <- datprevmonth %>% 
+  filter(Team == "Engineering") %>% 
+  group_by(Key.Activity) %>% 
+  summarise(TGT = round(100*sum(tgtteam),1), Ach = round(100*sum(achteam),2) ) %>% 
+  mutate(ACH = ifelse(Ach>TGT, TGT, Ach)) %>% 
+  arrange(desc(TGT)) %>% 
+  mutate(`ACH%` = round(100*ACH/TGT,1)) %>% 
+  select(Key.Activity, TGT, ACH, `ACH%`) 
+
+pkeyprev <- pkeyprev[1:7,] # TOp 2 key activities of p&ba of previous month
+
+# Add others row in pbaprev
+
+ot <- 100 - sum(pkeyprev$TGT)
+ot <- as.double(ot)                
+oth <- data.frame("Others", as.double(ot), 0,0)
+
+pkeyprev[8,] <- oth
+
+
+
+
+
+## --------------------------------------------------
+
+colors <- c('rgba(249, 146, 108, 1)',
+            'rgba(114, 195, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)'
+            )
+
+# Add Title
+pltttl <- 100* round( sum(dat$achteam[dat$Team=="Engineering"]), 3)
+
+pltttl12 <- paste("Team Achievement", pltttl,"%")
+
+plot_ly(data = pkey, labels = ~`Key Activity`, values = ~TGT, type = 'pie', 
+                         sort=T, direction="anticlockwise", marker = list(colors = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent', hoverinfo = 'label+percent', textfont = list(size = 13), textposition = 'outside', 
+                          showlegend = F, height = 350, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 85, t = 55,  pad = 1 ),
+                     title=pltttl12,
+         font=list(  size = 12))  
+
+
+## ---- eval=FALSE-----------------------------------
+## 
+## 
+## #### Engineering Team Previous Month Key Activities
+## 
+## colors <- c('rgba(249, 146, 108, 1)',
+##             'rgba(114, 195, 218, 1)',
+##             'rgba(108, 224, 189, 1)',
+##             'rgba(239, 118, 118, 1)',
+##             'rgba( 18, 167, 226, 1)',
+##             'rgba(244, 113, 222, 1)',
+##             'rgba(114, 218, 136, 1)',
+##             'rgba(255, 148, 184, 1)',
+##             'rgba(218, 114, 159, 1)',
+##             'rgba(114, 161, 218, 1)'
+##             )
+## 
+## # Add Title
+## pltttl2 <- 100* round( sum(datprevmonth$achteam[datprevmonth$Team=="Engineering"]), 3)
+## 
+## pltttl22 <- paste("Team Achievement", pltttl2,"%")
+## 
+## plot_ly(data = pkeyprev, labels = ~Key.Activity, values = ~TGT, type = 'pie',
+##                          sort=T, direction="anticlockwise", marker = list(colors = colors, line = list(color = '#FFFFFF', width = 1.2)),
+##                           #title= pltttl22,
+##            #title='<b>Key Activities</b>' ,
+##                          textinfo='label+percent', hoverinfo = 'label+percent', textfont = list(size = 13), textposition = 'outside',
+##                           showlegend = F, height = 350, width = 950
+##         ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 85, t = 55,  pad = 1 ),
+##                      title=pltttl22,
+##          font=list(  size = 12))
+
+
+## --------------------------------------------------
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Team == "Engineering") %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+  filter(Team == "Engineering") %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Team == "Engineering") %>% 
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`, na.rm = T),
+            Formmean = mean(`Formatting (20%)`, na.rm = T))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`,  
+  textfont = list(size = 14), 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = "Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`,   
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,   
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1,  fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+## --------------------------------------------------
+
+#### Engineering Team Top 10 Key Activities Table
+#kable(pkey)
+
+
+
+## --------------------------------------------------
+#### Engineering Team Top 10 Extended Responsibility Table
+#kable(pext)
+
+
+
+## --------------------------------------------------
+
+
+
+bakey <- dat %>% 
+  filter(Team == "Analytics") %>% 
+  group_by(`Key Activity`) %>% 
+  summarise(TGT = round(100*sum(tgtteam),1), Ach = round(100*sum(achteam),2) ) %>% 
+  mutate(ACH = ifelse(Ach>TGT, TGT, Ach)) %>% 
+  arrange(desc(ACH)) %>% 
+  mutate(`ACH%` = round(100*ACH/TGT,1)) %>% 
+  select(`Key Activity`, TGT, ACH, `ACH%`) 
+
+bakey <- bakey[1:10,]
+
+
+
+# Add others row in bakey
+
+ot <- 100 - sum(bakey$TGT)
+ot <- as.double(ot)                
+oth <- data.frame("Others", as.double(ot), 0,0)
+
+bakey[11,] <- oth
+
+baext <- dat %>% 
+  filter(Team == "Analytics") %>% 
+  group_by(`Extended Responsibility`) %>% 
+  summarise(TGT = round(100*sum(tgt),2), Ach = round(100*sum(ach),2) ) %>% 
+  mutate(ACH = ifelse(Ach>TGT, TGT, Ach)) %>% 
+  arrange(desc(ACH)) %>% 
+  mutate(`ACH%` = round(100*ACH/TGT,1)) %>% 
+  select(`Extended Responsibility`, TGT, ACH, `ACH%`)
+
+baext <- baext[1:10,]
+
+
+#Previous Month
+bakeyprev <- datprevmonth %>% 
+  filter(Team == "Analytics") %>% 
+  group_by(Key.Activity) %>% 
+  summarise(TGT = round(100*sum(tgtteam),1), Ach = round(100*sum(achteam),2) ) %>% 
+  mutate(ACH = ifelse(Ach>TGT, TGT, Ach)) %>% 
+  arrange(desc(TGT)) %>% 
+  mutate(`ACH%` = round(100*ACH/TGT,1)) %>% 
+  select(Key.Activity, TGT, ACH, `ACH%`) 
+
+bakeyprev <- bakeyprev[1:7,] # TOp 2 key activities of p&ba of previous month
+
+# Add others row in bakeyprev
+
+ot <- 100 - sum(bakeyprev$TGT)
+ot <- as.double(ot)                
+oth <- data.frame("Others", as.double(ot), 0,0)
+
+bakeyprev[8,] <- oth
+
+
+
+## --------------------------------------------------
+colors <- c('rgba(249, 146, 108, 1)',
+            'rgba(114, 195, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)'
+            )
+
+# Add Title
+pltttl <- 100* round( sum(dat$achteam[dat$Team=="Analytics"]), 3)
+
+pltttl12 <- paste("Team Achievement", pltttl,"%")
+
+plot_ly(data = bakey, labels = ~`Key Activity`, values = ~TGT, type = 'pie', 
+                         sort=T, direction="anticlockwise", marker = list(colors = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent', hoverinfo = 'label+percent', textfont = list(size = 13), textposition = 'outside', 
+                          showlegend = F, height = 350, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 85, t = 55,  pad = 1 ),
+                     title=pltttl12,
+         font=list(  size = 12))  
+
+
+## ---- eval=FALSE-----------------------------------
+## 
+## #### Analytics Team Previous Month Key Activities
+## 
+## colors <- c('rgba(249, 146, 108, 1)',
+##             'rgba(114, 195, 218, 1)',
+##             'rgba(108, 224, 189, 1)',
+##             'rgba(239, 118, 118, 1)',
+##             'rgba( 18, 167, 226, 1)',
+##             'rgba(244, 113, 222, 1)',
+##             'rgba(114, 218, 136, 1)',
+##             'rgba(255, 148, 184, 1)',
+##             'rgba(218, 114, 159, 1)',
+##             'rgba(114, 161, 218, 1)'
+##             )
+## # Add Title
+## pltttl2 <- 100* round( sum(datprevmonth$achteam[datprevmonth$Team=="Analytics"]), 3)
+## 
+## pltttl22 <- paste("Team Achievement", pltttl2,"%")
+## 
+## plot_ly(data = bakeyprev, labels = ~Key.Activity, values = ~TGT, type = 'pie',
+##                          sort=T, direction="anticlockwise", marker = list(colors = colors, line = list(color = '#FFFFFF', width = 1.2)),
+##                           #title= pltttl22,
+##            #title='<b>Key Activities</b>' ,
+##                          textinfo='label+percent', hoverinfo = 'label+percent', textfont = list(size = 13), textposition = 'outside',
+##                           showlegend = F, height = 350, width = 950
+##         ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 85, t = 55,  pad = 1 ),
+##                      title=pltttl22,
+##          font=list(  size = 12))
+
+
+## --------------------------------------------------
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Team == "Analytics") %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+  filter(Team == "Analytics") %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Team == "Analytics") %>% 
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`,   
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = "Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`,   
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,   
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1,  fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## --------------------------------------------------
+
+#### Analytics Team Top 10 Key Activities Table
+#kable(bakey)
+
+
+
+## --------------------------------------------------
+#### Analytics Team Top 10 Extended Responsibility Table
+#kable(baext)
+
+
+
+## ---- fig.height=4, fig.width=6--------------------
+
+# Filter only TOfazzol Sir marks, and take average of Manager him
+
+rankcom <- dat %>% 
+  filter(`Manager` == "Theodor") %>% 
+  group_by(Subteam) %>% 
+  summarise( Ach = 100*mean(Marks)) %>% 
+  arrange(desc(Ach)) %>% 
+  mutate(R=seq(1:length(Ach))) %>% 
+  select(R, Subteam, Ach)
+
+rankcom$Ach <- round(rankcom$Ach,1)
+
+plot_ly(rankcom, x = ~Ach, y = ~reorder(Subteam,Ach), 
+        color = ~Subteam,
+
+        type = 'bar',
+        
+        text = ~Ach,
+        textposition = 'auto',
+        textfont = list(color = '#000000', size = 12),
+
+        orientation = 'h', 
+        hoverinfo='y+text') %>% 
+        
+        #marker = list(color = 'rgba(99,21,133, 0.8)', 
+        #  line = list(color = 'rgba(99,21,133,1)', width = 1)) ) %>%
+  
+  layout( showlegend = FALSE,
+          xaxis = list(title = "", ticks="",zeroline = FALSE,  
+                       showline = FALSE, showticklabels = FALSE, 
+                       showgrid = FALSE),
+          yaxis = list(title = "",
+                       tickfont=list(size=15)),
+          autosize = F, width = 800, height = 400
+          #xaxis = list(tickfont = list(size = 8))
+  )  
+    
+
+
+## --------------------------------------------------
+
+
+teammembers <- readxl::read_xlsx("Team Members.xlsx")
+
+require(knitr)
+opts <- options(knitr.kable.NA = "")
+
+teammembers %>% kable() %>% kable_styling(bootstrap_options = "striped", 
+                                          font_size = 13, 
+                                          fixed_thead = list(enabled = T/F, background = "skyblue")) 
+
+
+
+## --------------------------------------------------
+
+# Keep only one member in all 5 teams
+# This way it will always be automatic
+
+
+rankcom <- dat %>% 
+        filter(`Manager` != "Theodor") 
+
+rankcom <- bind_rows(rankcom, dat %>% filter(Name == "Francis"))
+  
+  
+rankcom <- rankcom %>% 
+        group_by(Name, Subteam) %>% 
+        summarise(sum(FinalMark)) 
+
+
+rankcom <- rankcom %>% 
+        group_by(Subteam) %>% slice_max(order_by = `sum(FinalMark)`, n = 1)
+
+names(rankcom) <- c("Name", "Subteam", "Marks")
+
+
+rankcom$Marks <- 100*rankcom$Marks
+rankcom$Marks <- round(rankcom$Marks, 1)
+
+rankcom <- rankcom %>% arrange(desc(Marks))
+
+rankcom %>% kable() %>% kable_styling(bootstrap_options = "striped", 
+                                      font_size = 13, 
+                                      fixed_thead = list(enabled = T/F, background = "skyblue")) 
+
+
+
+
+
+
+## ---- fig.height=4, fig.width=6, fig.align='right'----
+
+rankcom <- rankcom %>% mutate(nam = paste(Name, "(", Subteam, ")"))
+
+plot_ly(rankcom, x = ~Marks, y = ~reorder(Name, Marks),
+                       color = ~Subteam,
+        
+        
+        text = ~Marks,
+        textposition = 'auto',
+        textfont = list(color = '#000000', size = 12),
+        
+                       type = 'bar', width = 1, orientation = 'h', 
+                       hoverinfo='y+text') %>%  
+                      #marker = list(color = 'rgba(29,41,133, 0.8)', 
+                      #line = list(color = 'rgba(29,41,133,1)', width = 1)) ) %>%
+            layout( showlegend = FALSE,
+              
+                    xaxis = list(title = "", ticks="",zeroline = FALSE,  
+                                 showline = FALSE, showticklabels = FALSE, 
+                                 showgrid = FALSE),
+                    yaxis = list(title = "",
+                                 tickfont=list(size=15)),
+                                 autosize = F, width = 800, height = 400,
+                    margin =list(l = 0, r = 0, b = 0, t = 0,  pad = 1 )
+                    #xaxis = list(tickfont = list(size = 8))
+                    )  
+
+
+
+
+## ---- fig.height=7.3-------------------------------
+rankcom <- dat %>% 
+        group_by(Name) %>% 
+        summarise( Ach = 100*sum(FinalMark)) %>% 
+        arrange(desc(Ach)) %>% 
+        mutate(R=seq(1:length(Ach))) %>% 
+        select(R, Name, Ach)
+
+rankcom$Ach <- round(rankcom$Ach,1)
+
+plot_ly(rankcom, x = ~Ach, y = ~reorder(Name,Ach), 
+                       type = 'bar', width = 1, orientation = 'h', text = ~Ach, textposition = 'auto', hoverinfo='y+text'
+        
+        ) %>%
+            layout( xaxis = list(title = "", ticks="",zeroline = FALSE,  
+                                 showline = FALSE, showticklabels = FALSE, 
+                                 showgrid = FALSE),
+                    yaxis = list(title = "",
+                                 tickfont=list(size=15)),
+                                 autosize = F, width = 700, height = 700
+                    #xaxis = list(tickfont = list(size = 8))
+                    )     
+
+
+## ---- eval=FALSE-----------------------------------
+## 
+## ### Current & Previous Month Rankings
+## 
+## rankcom <- dat %>%
+##   group_by(Name) %>%
+##   summarise( Ach = 100*sum(FinalMark)) %>%
+##   arrange(desc(Ach)) %>%
+##   mutate(R=seq(1:length(Ach))) %>%
+##   select(R, Name, Ach)
+## 
+## rankcom$Ach <- round(rankcom$Ach,2)
+## 
+## mergerank <- merge(rankcom, datprevrank, by = "Name")
+## names(mergerank)[4] <- "Previous Ach"
+## 
+## mergerankkable <- mergerank %>%
+##   arrange( desc(`Previous Ach` )) %>%
+##   mutate(Previous = 1:length(unique(dat$Name)))%>%
+##   mutate(Current = R)%>%
+##   select(Name, Current, Previous, Ach, `Previous Ach`) %>%
+##   arrange(desc(Ach))
+## 
+## require(knitr)
+## mergerankkable %>% kable() %>% kable_styling(bootstrap_options = "striped", font_size = 17)
+## 
+## 
+## 
+
+
+## --------------------------------------------------
+rankplan <- dat %>% filter(Team == "Engineering") %>% 
+        group_by(Name) %>% 
+        summarise( Ach = 100*sum(FinalMark)) %>% 
+        arrange(desc(Ach)) %>% 
+        mutate(R=seq(1:length(Ach))) %>% 
+        select(R, Name, Ach)
+
+rankplan$Ach <- round(rankplan$Ach,1)
+
+plot_ly(rankplan, x = ~Ach, y = ~reorder(Name,Ach), width = 2,
+                       type = 'bar', orientation = 'h',  text = ~Ach,
+        hoverinfo='y+text', textposition = 'auto', marker = list(color = 'rgba(199,21,133, 0.8)',
+                            line = list(color = 'rgba(199,21,133,1)', width = 1))) %>%
+            layout( xaxis = list(title = "", ticks="",zeroline = FALSE,  
+                                 showline = FALSE, showticklabels = FALSE, 
+                                 showgrid = FALSE),
+                    yaxis = list(title = "",
+                                 tickfont=list(size=15))
+                    #xaxis = list(tickfont = list(size = 8))
+                    )     
+
+
+## --------------------------------------------------
+rankan <- dat %>% filter(Team == "Analytics") %>% 
+        group_by(Name) %>% 
+        summarise( Ach = 100*sum(FinalMark)) %>% 
+        arrange(desc(Ach)) %>% 
+        mutate(R=seq(1:length(Ach))) %>% 
+        select(R, Name, Ach)
+
+rankan$Ach <- round(rankan$Ach,1)
+
+plot_ly(rankan, x = ~Ach, y = ~reorder(Name,Ach), 
+                       type = 'bar', width = 0.8, orientation = 'h',  text = ~Ach,
+        textposition = 'auto', 
+        hoverinfo='y+text', 
+        marker = list(color = 'rgba(	25,25,112, 0.8)',
+                line = list(color = 'rgba(	25,25,112,1)', width = 1))) %>%
+            layout( xaxis = list(title = "", ticks="",zeroline = FALSE,  
+                                 showline = FALSE, showticklabels = FALSE, 
+                                 showgrid = FALSE),
+                    yaxis = list(title = "",
+                                 tickfont=list(size=15))
+                    #xaxis = list(tickfont = list(size = 8))
+                    )     
+
+
+## ---- fig.height = 10.5, fig.width = 8, eval=FALSE----
+## 
+## ### Consistency Ranking September to November
+## 
+## require(readxl)
+## require(plotly)
+## require(dplyr)
+## 
+## datconsis <- readxl::read_xlsx("Jul-Nov.xlsx")
+## 
+## 
+## datconsis <- data.frame(datconsis)
+## 
+## datconsis$Average <- round(rowMeans(datconsis[, -1], na.rm = T),2)
+## 
+## datconsis <- datconsis %>% arrange(Average)
+## 
+## #dat
+## 
+## datconsis$rank <- seq(1:length(datconsis$Name))
+## 
+## #dat
+## 
+## #class(dat)
+## 
+## November <- datconsis$November
+## October <- datconsis$October
+## September <- datconsis$September
+## #August <- datconsis$August
+## #July <- datconsis$July
+## Average <- datconsis$Average
+## 
+## fig <- plot_ly(datconsis) %>% add_trace(x = ~September, y = ~Name, type = 'bar',
+##                          text = September, textposition = 'auto',
+##                          name = 'September',
+##                          hoverinfo = 'Name+September',
+##                          marker = list(color = 'rgb((255,127,80))',
+##                                        line = list(color = 'rgb(8,98,107)', width = 1.5))) %>%
+##   layout(yaxis = list(categoryorder = "array", categoryarray = rank))    %>%
+## 
+## 
+##  add_trace(x = ~October, y = ~Name, type = 'bar',
+##                          text = October, textposition = 'auto',
+##                          name = 'October',
+##                          hoverinfo = 'Name+October',
+##                          marker = list(color = 'rgb(158, 221, 124)',
+##                                        line = list(color = 'rgb(8,98,107)', width = 1.5))) %>%
+##   layout(yaxis = list(categoryorder = "array", categoryarray = rank)) %>%
+## 
+## 
+## 
+## 
+##  add_trace(x = ~November, y = ~Name, type = 'bar',
+##                          text = November, textposition = 'auto',
+##                          name = 'November',
+##                          hoverinfo = 'Name+November',
+##                          marker = list(color = 'rgb(158, 221, 124)',
+##                                        line = list(color = 'rgb(8,98,107)', width = 1.5))) %>%
+##   layout(yaxis = list(categoryorder = "array", categoryarray = rank)) %>%
+## 
+## 
+## 
+## 
+##   add_trace(x = ~Average, y = ~Name, type = 'bar',
+##                          text = Average, textposition = 'auto',
+##                          name = 'Average',
+##                          hoverinfo = 'Name+Average',
+##                          marker = list(color = 'rgb(198,202,225)',
+##                                        line = list(color = 'rgb(8,48,107)', width = 1.5))) %>%
+##   layout(yaxis = list(categoryorder = "array", categoryarray = rank),
+##          xaxis= list(showticklabels = FALSE, title=" "))
+## 
+## 
+## fig %>%
+## layout(yaxis = list(categoryorder = "array", categoryarray = rank, showticklabels = TRUE, title="", tickfont=list(size=15)),
+##        xaxis= list(title=""))
+## 
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Tucker") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Tucker") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+
+
+
+## --------------------------------------------------
+
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 55, t = 40,  pad = 1 )) 
+
+
+## ---- fig.width=5----------------------------------
+Nam <- "Tucker"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+
+
+#ne <- as.character(length(dind2$`Extended Responsibility`))
+#as <- sum(dind2$Ach)
+#as2 <- mean(dind2$`Ach%`)
+#ot <- data.frame("Total", ne, 100, as, as2)
+#dind2[length(dind2$Name) + 1,  ] <- ot 
+#x <- dind2 %>% kable(digits = 1) %>% kable_styling(bootstrap_options = "striped")
+#row_spec(x, dim(dind2)[1], bold = TRUE)
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Benedict") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Benedict") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+
+
+
+## --------------------------------------------------
+
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 65, t = 40,  pad = 1 )) 
+
+
+## ---- fig.width=5----------------------------------
+Nam <- "Benedict"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+
+
+#ne <- as.character(length(dind2$`Extended Responsibility`))
+#as <- sum(dind2$Ach)
+#as2 <- mean(dind2$`Ach%`)
+#ot <- data.frame("Total", ne, 100, as, as2)
+#dind2[length(dind2$Name) + 1,  ] <- ot 
+#x <- dind2 %>% kable(digits = 1) %>% kable_styling(bootstrap_options = "striped")
+#row_spec(x, dim(dind2)[1], bold = TRUE)
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Jenson") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Jenson") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent', hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Jenson"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`, na.rm = T), 
+            Impmean = mean(`Improvement Initiatives (30%)`, na.rm = T),
+            Formmean = mean(`Formatting (20%)`, na.rm = T))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Jamie") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Jamie") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Chris"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Chris") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Chris") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Chris"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Elliot") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Elliot") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 30,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Elliot"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Nancy") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Nancy") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Nancy"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Ross") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Ross") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Ross"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Scarlette") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Scarlette") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+
+
+
+## --------------------------------------------------
+
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 55, t = 40,  pad = 1 )) 
+
+
+## ---- fig.width=5----------------------------------
+Nam <- "Scarlette"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "10em") %>% column_spec( 2, width = "15em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+
+
+#ne <- as.character(length(dind2$`Extended Responsibility`))
+#as <- sum(dind2$Ach)
+#as2 <- mean(dind2$`Ach%`)
+#ot <- data.frame("Total", ne, 100, as, as2)
+#dind2[length(dind2$Name) + 1,  ] <- ot 
+#x <- dind2 %>% kable(digits = 1) %>% kable_styling(bootstrap_options = "striped")
+#row_spec(x, dim(dind2)[1], bold = TRUE)
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Marshman") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Marshman") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Marshman"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Hunter") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Hunter") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 65, t = 30,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Hunter"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Margaret") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Margaret") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 75, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Margaret"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Eric") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Eric") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 80, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Eric"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Alan") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Alan") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Alan"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Francis") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Francis") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 70, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Francis"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Geoffrey") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Geoffrey") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 90, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Geoffrey"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Roy") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Roy") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Roy"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+dind <- dat %>%
+  filter(Name=="Blake") %>%  
+  select(Name, `Key Activity`, Target, FinalMark ) %>% 
+  group_by(Name, `Key Activity`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt) 
+
+
+dind2 <- dat %>%
+  ungroup() %>% 
+  filter(Name=="Blake") %>%  
+  select(Name, `Extended Responsibility` , Target, FinalMark ) %>% 
+  group_by(Name, `Extended Responsibility`) %>% 
+  summarise(Tgt = 100*sum(Target), Ach = 100*sum(FinalMark)) %>% 
+  mutate(`Ach%` = 100*Ach/Tgt)
+
+
+## --------------------------------------------------
+colors <- c('rgba(114, 195, 218, 1)', 
+            'rgba(114, 218, 136, 1)', 
+            'rgba(255, 148, 184, 1)', 
+            'rgba(218, 114, 159, 1)', 
+            'rgba(114, 161, 218, 1)',
+            'rgba(108, 224, 189, 1)',
+            'rgba(239, 118, 118, 1)',
+            'rgba(249, 146, 108, 1)',
+            'rgba( 18, 167, 226, 1)',
+            'rgba(244, 113, 222, 1)')
+
+plot_ly(data = dind, labels = ~`Key Activity`, values = ~Tgt, type = 'pie', 
+                         sort=T, direction="anticlockwise",marker = list(colors  = colors, line = list(color = '#FFFFFF', width = 1.2)),
+                          #title='<b>Key Activities</b>' ,
+                         textinfo='label+percent',hoverinfo = 'label+percent', textfont = list(size = 15), textposition = 'outside', 
+                          showlegend = F, height = 320, width = 950
+        ) %>% layout(autosize = F, margin =list(l = 0, r = 0, b = 50, t = 40,  pad = 1 )) 
+
+
+## --------------------------------------------------
+Nam <- "Blake"
+
+ar1 <- c("High", "Medium", "Moderate")
+dpi1 <- dat %>% 
+  filter(Name == Nam) %>% 
+  group_by(Importance) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi1
+if(length(unique(dpi1$Importance))!=3){
+  x <- data.frame(ar1[ar1 %in% dpi1$Importance==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi1)
+  dpi1 <- dpi1 %>% rbind(x)
+}
+########################################
+ar2 <- c("Ceiling", "Target", "Floor")
+dpi2 <- dat %>% 
+   filter(Name == Nam) %>% 
+  group_by(Deadline) %>% 
+  summarise(Imp = n()) %>% 
+  mutate(`Impn` = round(100*Imp /sum(Imp),1)) %>%           
+  mutate(`Imp%` = paste(`Impn`, "%"))
+#dpi2
+
+if(length(unique(dpi2$Deadline))!=3){
+  x <- data.frame(ar2[ar2 %in% dpi2$Deadline==FALSE], 0,0, "0")
+  colnames(x) <- names(dpi2)
+  dpi2 <- dpi2 %>% rbind(x)
+}
+
+dpi2 <- dpi2[order(match(ar2, dpi2$Deadline)),]
+######################################
+dpi3 <- dat %>% 
+  ungroup() %>% 
+  filter(Name == Nam) %>%  
+  select(`Factual Accuracy (50%)`, `Improvement Initiatives (30%)`, `Formatting (20%)`) %>% 
+  summarise(Factmean = mean(`Factual Accuracy (50%)`), 
+            Impmean = mean(`Improvement Initiatives (30%)`),
+            Formmean = mean(`Formatting (20%)`))
+
+dpi3  <- data.frame(c(names(dpi3)), c(dpi3$Factmean, dpi3$Impmean, dpi3$Formmean))
+names(dpi3) <- c("Category", "Marks")
+dpi3$Category <- c("Factual", "Improvement", "Formatting") 
+dpi3$Marks <- round( dpi3$Marks * 100 , 1)
+dpi3$Marks2 <- paste(dpi3$Marks, "%")
+#dpi3
+
+################################
+
+fig1 <- plot_ly(
+  data = dpi1,
+  x = ~Importance,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(248, 180, 135, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,   orientation = 'v'
+)%>% layout(yaxis = list(title = ""),
+            xaxis = list(title = " Report Importance",
+                         categoryorder="array",
+                         categoryarray = c("High", "Medium", "Moderate"))
+)
+#fig1
+
+fig2 <- plot_ly(
+  data = dpi2,
+  x = ~Deadline,
+  y = ~`Impn`,
+  text = ~`Imp%`, 
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(25, 159, 174, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  
+  hoverinfo = "x+text",
+  type = "bar", width = 850, orientation = 'v'
+)%>% layout(barmode="overlay",
+            yaxis = list(title = ""),
+            xaxis = list(
+              categoryorder="array",
+              categoryarray = as.character("Ceiling", "Target", "Floor"),
+              title = "Deadline")
+)
+#fig2
+
+fig3 <- plot_ly(
+  data = dpi3,
+  x = ~Category,
+  y = ~Marks,
+  text = ~Marks2,  
+  textfont = list(size = 14),
+  textposition = 'auto',
+  showlegend = FALSE,
+  marker = list(color = 'rgba(34, 201, 126, 1)', 
+                line = list(color = 'rgb(8,48,107)', width = 1.5)),
+  hoverinfo = "x+text",
+  type = "bar", width = 850,  orientation = 'v'
+)%>% layout(barmode = "overlay",
+            yaxis = list(title = ""),
+            xaxis = list(title = "Qualitative Marks",
+                         categoryorder="array",
+                         categoryarray = c("Factual", "Formatting", "Improvement"))
+)
+#fig3
+subplot(fig1, fig2, fig3, shareY = T, nrows = 1, titleX = TRUE )
+
+
+
+
+## ---- echo=FALSE-----------------------------------
+
+dind3 <-  dat %>% 
+  filter(Name == Nam) %>% 
+  select(Name, `Key Activity`, `Extended Responsibility`,  Marks) %>% arrange(desc(Marks))
+
+dind3 <- dind3[, -c(1,2)]
+
+dind3$Marks <- round(100*dind3$Marks, 0)
+
+names(dind3)[3] <- "Qualitative Marks"
+
+x <- dind3 %>% kable(digits = 1, align = "llc") %>% kable_styling(bootstrap_options = "striped")
+
+x  %>% column_spec( 1, width = "12em") %>% column_spec( 2, width = "18em") %>% column_spec( c(3), width = "6em")
+
+
+
+
+## --------------------------------------------------
+
+tm <- c("Engineering", "Analytics")
+tk <- c(length(unique(dat$`Key Activity`[dat$Team=="Engineering"])),
+        length(unique(dat$`Key Activity`[dat$Team=="Analytics"])))
+
+te <- c(length(unique(dat$`Extended Responsibility`[dat$Team=="Engineering"])),
+        length(unique(dat$`Extended Responsibility`[dat$Team=="Analytics"])))
+
+tr <- data.frame(tm, tk, te)
+
+tt <- data.frame(tm = "Total", tk = length(unique(dat$`Key Activity`)), te=length(unique(dat$`Extended Responsibility`)))
+
+t <- rbind(tr, tt)
+
+x <- t %>% kable(col.names = c("Team", "# Key Activity", "# Extended Responsibility")) %>% kable_styling(bootstrap_options = "striped", font_size = 17)
+row_spec(x, 3, bold = TRUE, font_size = 19)
+
+
+
+
+## --------------------------------------------------
+comsum <- dat %>% 
+            #ungroup() %>% 
+            #filter(Team == "Analytics") %>% 
+            select(Month, Week, `Key Activity`, `Extended Responsibility`) %>% 
+            group_by(Week) %>% 
+            summarise( ############ Unique Nisi ###############
+                       `# Key Activity` = length(unique(`Key Activity`)),
+                       `# Extended Responsibility` = length(unique(`Extended Responsibility`))
+            ) 
+
+comsum %>% kable() %>% kable_styling(bootstrap_options = "striped", font_size = 17)
+
+
+
+## ---- echo=F---------------------------------------
+
+# Missing Reports 
+
+require(knitr)
+
+datmissing %>% kable() %>%  kable_styling(bootstrap_options = "striped", font_size = 14) %>% column_spec( 1, width = "2em") %>% column_spec( 2, width = "15em") %>% column_spec( 3, width = "10em") %>% column_spec( 4, width = "14em")
+
+
+
+
+
+## ---- eval=FALSE-----------------------------------
+## 
+## 
+## ### Engineering Team Reports Summary
+## 
+## plsum <- dat %>%
+##             #ungroup() %>%
+##             filter(Team == "Engineering") %>%
+##             select(Month, Week, `Key Activity`, `Extended Responsibility`) %>%
+##             group_by(Week ) %>%
+##             summarise( ############ Unique Nisi ###############
+##                        `# Key Activity` = length(unique(`Key Activity`)),
+##                        `# Extended Responsibility` = length(unique(`Extended Responsibility`))
+##             ) %>%
+##             adorn_totals("row")
+## 
+## plsum %>% kable() %>% kable_styling((bootstrap_options = "striped", font_size = 17)
+## 
+
+
+## ---- eval=FALSE-----------------------------------
+## 
+## ### Analytics Team Reports Summary
+## ansum <- dat %>%
+##             #ungroup() %>%
+##             filter(Team == "Analytics") %>%
+##             select(Month, Week, `Key Activity`, `Extended Responsibility`) %>%
+##             group_by(Week ) %>%
+##             summarise( ############ Unique Nisi ###############
+##                        `# Key Activity` = length(unique(`Key Activity`)),
+##                        `# Extended Responsibility` = length(unique(`Extended Responsibility`))
+##             ) %>%
+##             adorn_totals("row")
+## 
+## ansum %>% kable() %>% kable_styling((bootstrap_options = "striped", font_size = 18)
+## 
+
+
+## --------------------------------------------------
+
+require(DT)
+
+markstable <- dat[, c(1:10) ]
+
+# Change Name
+names(markstable)[6] <- "Manager Mr/Ms"
+names(markstable)[10] <- "Qualitative Marks"
+
+
+# Multiply by 100
+markstable[, 7:10] <- 100*markstable[, 7:10]
+markstable[, 7:10] <- round(markstable[7:10], 1)
+
+markstable %>%  DT::datatable(class = 'cell-border stripe', width = "1600px",
+              extensions = c('KeyTable', 'FixedHeader', 'Scroller', "FixedColumns"),
+              options = list(
+                             paging = T,
+                             autoWidth = FALSE,
+                             #dom = 't',
+                             scrollX=TRUE, 
+                             scrollY = 500,
+                             columnDefs = list(list(width = '350px', 
+                                                    targets = list(1,2,3))),
+                             pageLength = 50, 
+                             fixedHeader = TRUE,
+                             #deferRender = TRUE,
+                             #scroller = TRUE,
+                             keys = TRUE
+                             #fixedColumns = list(leftColumns = 4)
+                             )
+              ) %>% DT::formatStyle(columns = 7:10, 
+                                    fontSize = '120%')
+
+
+
+## ---- eval=FALSE, message=FALSE, warning=false-----
+## 
+## 
+## 
+## 
+
